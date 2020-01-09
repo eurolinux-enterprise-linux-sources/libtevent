@@ -6,7 +6,7 @@
 
 Name: libtevent
 Version: 0.9.18
-Release: 1%{?dist}
+Release: 3%{?dist}
 Group: System Environment/Daemons
 Summary: The tevent library
 License: LGPLv3+
@@ -24,6 +24,7 @@ BuildRequires: libxslt
 # Patches
 Patch0001:  tevent-0.9.18-relax-talloc-requirements.patch
 Patch0002:  0001-tevent-Fix-Coverity-ID-989236-Operands-don-t-affect-.patch
+Patch0003:  tevent-0.9.18-wait_never_finishes.patch
 
 
 %description
@@ -55,6 +56,7 @@ Python bindings for libtevent
 %setup -q -n tevent-%{version}
 %patch0001 -p1 -b .talloc_minversion
 %patch0002 -p3 -b .flags
+%patch0003 -p3 -b .wait
 
 %build
 %configure --disable-rpath \
@@ -108,8 +110,16 @@ rm -rf $RPM_BUILD_ROOT
 %postun -p /sbin/ldconfig
 
 %changelog
-* Mon Jul 08 2013 Jakub Hrozek <jhrozek@redhat.com> - 0.9.18-1
-- Resolves: rhbz#980956 - Rebase libtevent to version 0.9.18
+* Wed Aug 07 2013 Jakub Hrozek <jhrozek@redhat.com> - 0.9.18-3
+- Resolves: rhnz#978962 - tevent_loop_wait() never finishes
+
+* Thu Jun 20 2013 Jakub Hrozek <jhrozek@redhat.com> - 0.9.18-2
+- Resolves: rhbz#975489 - Additional flags might have no effect
+                          on 32bit architectures
+
+* Tue May 14 2013 Jakub Hrozek <jhrozek@redhat.com> - 0.9.18-1
+- Resolves: rhbz#951034 - Rebase libtevent to version 0.9.18
+- Remove obsolete patches
 
 * Mon Aug 20 2010 Jakub Hrozek <jhrozek@redhat.com> - 0.9.17-1
 - Rebase to 0.9.17 to provide the version Samba4 needs
