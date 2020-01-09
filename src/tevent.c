@@ -88,7 +88,7 @@ bool tevent_register_backend(const char *name, const struct tevent_ops *ops)
 		}
 	}
 
-	e = talloc(talloc_autofree_context(), struct tevent_ops_list);
+	e = talloc(NULL, struct tevent_ops_list);
 	if (e == NULL) return false;
 
 	e->name = name;
@@ -104,8 +104,7 @@ bool tevent_register_backend(const char *name, const struct tevent_ops *ops)
 void tevent_set_default_backend(const char *backend)
 {
 	talloc_free(tevent_default_backend);
-	tevent_default_backend = talloc_strdup(talloc_autofree_context(),
-					       backend);
+	tevent_default_backend = talloc_strdup(NULL, backend);
 }
 
 /*
@@ -114,6 +113,8 @@ void tevent_set_default_backend(const char *backend)
 static void tevent_backend_init(void)
 {
 	tevent_select_init();
+	tevent_poll_init();
+	tevent_poll_mt_init();
 	tevent_standard_init();
 #ifdef HAVE_EPOLL
 	tevent_epoll_init();
@@ -176,7 +177,25 @@ int tevent_common_context_destructor(struct tevent_context *ev)
 		sn = se->next;
 		se->event_ctx = NULL;
 		DLIST_REMOVE(ev->signal_events, se);
+		/*
+		 * This is important, Otherwise signals
+		 * are handled twice in child. eg, SIGHUP.
+		 * one added in parent, and another one in
+		 * the child. -- BoYang
+		 */
+		tevent_cleanup_pending_signal_handlers(se);
 	}
+
+	/* removing nesting hook or we get an abort when nesting is
+	 * not allowed. -- SSS
+	 * Note that we need to leave the allowed flag at its current
+	 * value, otherwise the use in tevent_re_initialise() will
+	 * leave the event context with allowed forced to false, which
+	 * will break users that expect nesting to be allowed
+	 */
+	ev->nesting.level = 0;
+	ev->nesting.hook_fn = NULL;
+	ev->nesting.hook_private = NULL;
 
 	return 0;
 }
@@ -192,8 +211,9 @@ int tevent_common_context_destructor(struct tevent_context *ev)
 
   NOTE: use tevent_context_init() inside of samba!
 */
-static struct tevent_context *tevent_context_init_ops(TALLOC_CTX *mem_ctx,
-						      const struct tevent_ops *ops)
+struct tevent_context *tevent_context_init_ops(TALLOC_CTX *mem_ctx,
+					       const struct tevent_ops *ops,
+					       void *additional_data)
 {
 	struct tevent_context *ev;
 	int ret;
@@ -204,6 +224,7 @@ static struct tevent_context *tevent_context_init_ops(TALLOC_CTX *mem_ctx,
 	talloc_set_destructor(ev, tevent_common_context_destructor);
 
 	ev->ops = ops;
+	ev->additional_data = additional_data;
 
 	ret = ev->ops->context_init(ev);
 	if (ret != 0) {
@@ -235,7 +256,7 @@ struct tevent_context *tevent_context_init_byname(TALLOC_CTX *mem_ctx,
 
 	for (e=tevent_backends;e;e=e->next) {
 		if (strcmp(name, e->name) == 0) {
-			return tevent_context_init_ops(mem_ctx, e->ops);
+			return tevent_context_init_ops(mem_ctx, e->ops, NULL);
 		}
 	}
 	return NULL;
@@ -255,9 +276,6 @@ struct tevent_context *tevent_context_init(TALLOC_CTX *mem_ctx)
 /*
   add a fd based event
   return NULL on failure (memory allocation error)
-
-  if flags contains TEVENT_FD_AUTOCLOSE then the fd will be closed when
-  the returned fd_event context is freed
 */
 struct tevent_fd *_tevent_add_fd(struct tevent_context *ev,
 				 TALLOC_CTX *mem_ctx,
@@ -387,7 +405,6 @@ struct tevent_immediate *_tevent_create_immediate(TALLOC_CTX *mem_ctx,
 
 /*
   schedule an immediate event
-  return NULL on failure
 */
 void _tevent_schedule_immediate(struct tevent_immediate *im,
 				struct tevent_context *ev,
@@ -608,4 +625,19 @@ int tevent_common_loop_wait(struct tevent_context *ev,
 int _tevent_loop_wait(struct tevent_context *ev, const char *location)
 {
 	return ev->ops->loop_wait(ev, location);
+}
+
+
+/*
+  re-initialise a tevent context. This leaves you with the same
+  event context, but all events are wiped and the structure is
+  re-initialised. This is most useful after a fork()  
+
+  zero is returned on success, non-zero on failure
+*/
+int tevent_re_initialise(struct tevent_context *ev)
+{
+	tevent_common_context_destructor(ev);
+
+	return ev->ops->context_init(ev);
 }

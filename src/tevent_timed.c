@@ -114,7 +114,7 @@ struct timeval tevent_timeval_add(const struct timeval *tv, uint32_t secs,
 	tv2.tv_sec += secs;
 	tv2.tv_usec += usecs;
 	tv2.tv_sec += tv2.tv_usec / 1000000;
-	tv2.tv_usec += tv2.tv_usec % 1000000;
+	tv2.tv_usec = tv2.tv_usec % 1000000;
 
 	return tv2;
 }
@@ -197,7 +197,7 @@ struct tevent_timer *tevent_common_add_timer(struct tevent_context *ev, TALLOC_C
 /*
   do a single event loop using the events defined in ev
 
-  return the delay untill the next timed event,
+  return the delay until the next timed event,
   or zero if a timed event was triggered
 */
 struct timeval tevent_common_loop_timer_delay(struct tevent_context *ev)
@@ -208,7 +208,7 @@ struct timeval tevent_common_loop_timer_delay(struct tevent_context *ev)
 	if (!te) {
 		/* have a default tick time of 30 seconds. This guarantees
 		   that code that uses its own timeout checking will be
-		   able to proceeed eventually */
+		   able to proceed eventually */
 		return tevent_timeval_set(30, 0);
 	}
 
