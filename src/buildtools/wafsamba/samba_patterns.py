@@ -1,31 +1,30 @@
 # a waf tool to add extension based build patterns for Samba
 
-import Task
-from TaskGen import extension
-from samba_utils import *
+import Build
 from wafsamba import samba_version_file
 
 def write_version_header(task):
     '''print version.h contents'''
     src = task.inputs[0].srcpath(task.env)
-    tgt = task.outputs[0].bldpath(task.env)
 
     version = samba_version_file(src, task.env.srcdir, env=task.env, is_install=task.env.is_install)
     string = str(version)
 
-    f = open(tgt, 'w')
-    s = f.write(string)
-    f.close()
+    task.outputs[0].write(string)
     return 0
 
 
 def SAMBA_MKVERSION(bld, target):
     '''generate the version.h header for Samba'''
+
+    # We only force waf to re-generate this file if we are installing,
+    # because only then is information not included in the deps (the
+    # git revision) included in the version.
     t = bld.SAMBA_GENERATOR('VERSION',
                             rule=write_version_header,
                             source= 'VERSION',
                             target=target,
-                            always=True)
+                            always=bld.is_install)
     t.env.is_install = bld.is_install
 Build.BuildContext.SAMBA_MKVERSION = SAMBA_MKVERSION
 
@@ -55,6 +54,8 @@ def write_build_options_header(fp):
     fp.write("#include \"includes.h\"\n")
     fp.write("#include \"build_env.h\"\n")
     fp.write("#include \"dynconfig/dynconfig.h\"\n")
+    fp.write("#include \"lib/cluster_support.h\"\n")
+
     fp.write("\n")
     fp.write("static int output(bool screen, const char *format, ...) PRINTF_ATTRIBUTE(2,3);\n")
     fp.write("void build_options(bool screen);\n")
@@ -110,7 +111,6 @@ def write_build_options_header(fp):
     fp.write("       output(screen,\"\\nPaths:\\n\");\n")
     fp.write("       output(screen,\"   SBINDIR: %s\\n\", get_dyn_SBINDIR());\n")
     fp.write("       output(screen,\"   BINDIR: %s\\n\", get_dyn_BINDIR());\n")
-    fp.write("       output(screen,\"   SWATDIR: %s\\n\", get_dyn_SWATDIR());\n")
     fp.write("       output(screen,\"   CONFIGFILE: %s\\n\", get_dyn_CONFIGFILE());\n")
     fp.write("       output(screen,\"   LOGFILEBASE: %s\\n\", get_dyn_LOGFILEBASE());\n")
     fp.write("       output(screen,\"   LMHOSTSFILE: %s\\n\",get_dyn_LMHOSTSFILE());\n")
@@ -126,17 +126,18 @@ def write_build_options_header(fp):
     fp.write("\n")
 
 def write_build_options_footer(fp):
+    fp.write("       /* Output the sizes of the various cluster features */\n")
+    fp.write("       output(screen, \"\\n%s\", cluster_support_features());\n")
+    fp.write("\n")
     fp.write("       /* Output the sizes of the various types */\n")
     fp.write("       output(screen, \"\\nType sizes:\\n\");\n")
     fp.write("       output(screen, \"   sizeof(char):         %lu\\n\",(unsigned long)sizeof(char));\n")
     fp.write("       output(screen, \"   sizeof(int):          %lu\\n\",(unsigned long)sizeof(int));\n")
     fp.write("       output(screen, \"   sizeof(long):         %lu\\n\",(unsigned long)sizeof(long));\n")
-    fp.write("#if HAVE_LONGLONG\n")
     fp.write("       output(screen, \"   sizeof(long long):    %lu\\n\",(unsigned long)sizeof(long long));\n")
-    fp.write("#endif\n")
-    fp.write("       output(screen, \"   sizeof(uint8):        %lu\\n\",(unsigned long)sizeof(uint8));\n")
-    fp.write("       output(screen, \"   sizeof(uint16):       %lu\\n\",(unsigned long)sizeof(uint16));\n")
-    fp.write("       output(screen, \"   sizeof(uint32):       %lu\\n\",(unsigned long)sizeof(uint32));\n")
+    fp.write("       output(screen, \"   sizeof(uint8_t):      %lu\\n\",(unsigned long)sizeof(uint8_t));\n")
+    fp.write("       output(screen, \"   sizeof(uint16_t):     %lu\\n\",(unsigned long)sizeof(uint16_t));\n")
+    fp.write("       output(screen, \"   sizeof(uint32_t):     %lu\\n\",(unsigned long)sizeof(uint32_t));\n")
     fp.write("       output(screen, \"   sizeof(short):        %lu\\n\",(unsigned long)sizeof(short));\n")
     fp.write("       output(screen, \"   sizeof(void*):        %lu\\n\",(unsigned long)sizeof(void*));\n")
     fp.write("       output(screen, \"   sizeof(size_t):       %lu\\n\",(unsigned long)sizeof(size_t));\n")
@@ -199,6 +200,6 @@ def SAMBA_BLDOPTIONS(bld, target):
     '''generate the bld_options.c for Samba'''
     t = bld.SAMBA_GENERATOR(target,
                             rule=write_build_options,
-                            target=target,
-                            always=True)
+                            dep_vars=['defines'],
+                            target=target)
 Build.BuildContext.SAMBA_BLDOPTIONS = SAMBA_BLDOPTIONS

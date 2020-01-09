@@ -39,6 +39,7 @@ struct tevent_fd;
 struct tevent_timer;
 struct tevent_immediate;
 struct tevent_signal;
+struct tevent_thread_proxy;
 
 /**
  * @defgroup tevent The tevent API
@@ -176,6 +177,11 @@ void tevent_set_default_backend(const char *backend);
  *
  * @note To cancel the monitoring of a file descriptor, call talloc_free()
  * on the object returned by this function.
+ *
+ * @note The caller should avoid closing the file descriptor before
+ * calling talloc_free()! Otherwise the behaviour is undefined which
+ * might result in crashes. See https://bugzilla.samba.org/show_bug.cgi?id=11141
+ * for an example.
  */
 struct tevent_fd *tevent_add_fd(struct tevent_context *ev,
 				TALLOC_CTX *mem_ctx,
@@ -319,6 +325,8 @@ void _tevent_schedule_immediate(struct tevent_immediate *im,
  *
  * @note To cancel a signal handler, call talloc_free() on the event returned
  * from this function.
+ *
+ * @see tevent_num_signals, tevent_sa_info_queue_count
  */
 struct tevent_signal *tevent_add_signal(struct tevent_context *ev,
                      TALLOC_CTX *mem_ctx,
@@ -339,6 +347,31 @@ struct tevent_signal *_tevent_add_signal(struct tevent_context *ev,
 	_tevent_add_signal(ev, mem_ctx, signum, sa_flags, handler, private_data, \
 			   #handler, __location__)
 #endif
+
+/**
+ * @brief the number of supported signals
+ *
+ * This returns value of the configure time TEVENT_NUM_SIGNALS constant.
+ *
+ * The 'signum' argument of tevent_add_signal() must be less than
+ * TEVENT_NUM_SIGNALS.
+ *
+ * @see tevent_add_signal
+ */
+size_t tevent_num_signals(void);
+
+/**
+ * @brief the number of pending realtime signals
+ *
+ * This returns value of TEVENT_SA_INFO_QUEUE_COUNT.
+ *
+ * The tevent internals remember the last TEVENT_SA_INFO_QUEUE_COUNT
+ * siginfo_t structures for SA_SIGINFO signals. If the system generates
+ * more some signals get lost.
+ *
+ * @see tevent_add_signal
+ */
+size_t tevent_sa_info_queue_count(void);
 
 #ifdef DOXYGEN
 /**
@@ -584,8 +617,8 @@ void tevent_get_trace_callback(struct tevent_context *ev,
  * file descriptor (tevent_add_fd) and timer (tevent_add_timed) events
  * are considered too low-level to be used in larger computations. To
  * read and write from and to sockets, Samba provides two calls on top
- * of tevent_add_fd: read_packet_send/recv and writev_send/recv. These
- * requests are much easier to compose than the low-level event
+ * of tevent_add_fd: tstream_read_packet_send/recv and tstream_writev_send/recv.
+ * These requests are much easier to compose than the low-level event
  * handlers called from tevent_add_fd.
  *
  * A lot of the simplicity tevent_req has brought to the notoriously
@@ -907,6 +940,41 @@ bool _tevent_req_cancel(struct tevent_req *req, const char *location);
 	_tevent_req_cancel(req, __location__)
 #endif
 
+/**
+ * @brief A typedef for a cleanup function for a tevent request.
+ *
+ * @param[in]  req       The tevent request calling this function.
+ *
+ * @param[in]  req_state The current tevent_req_state.
+ *
+ */
+typedef void (*tevent_req_cleanup_fn)(struct tevent_req *req,
+				      enum tevent_req_state req_state);
+
+/**
+ * @brief This function sets a cleanup function for the given tevent request.
+ *
+ * This function can be used to setup a cleanup function for the given request.
+ * This will be triggered when the tevent_req_done() or tevent_req_error()
+ * function was called, before notifying the callers callback function,
+ * and also before scheduling the deferred trigger.
+ *
+ * This might be useful if more than one tevent_req belong together
+ * and need to finish both requests at the same time.
+ *
+ * The cleanup function is able to call tevent_req_done() or tevent_req_error()
+ * recursively, the cleanup function is only triggered the first time.
+ *
+ * The cleanup function is also called by tevent_req_received()
+ * (possibly triggered from tevent_req_destructor()) before destroying
+ * the private data of the tevent_req.
+ *
+ * @param[in]  req      The request to use.
+ *
+ * @param[in]  fn       A pointer to the cancel function.
+ */
+void tevent_req_set_cleanup_fn(struct tevent_req *req, tevent_req_cleanup_fn fn);
+
 #ifdef DOXYGEN
 /**
  * @brief Create an async tevent request.
@@ -919,9 +987,9 @@ bool _tevent_req_cancel(struct tevent_req *req, const char *location);
  * req = tevent_req_create(mem_ctx, &state, struct computation_state);
  * @endcode
  *
- * Tevent_req_create() creates the state variable as a talloc child of
- * its result. The state variable should be used as the talloc parent
- * for all temporary variables that are allocated during the async
+ * Tevent_req_create() allocates and zeros the state variable as a talloc
+ * child of its result. The state variable should be used as the talloc
+ * parent for all temporary variables that are allocated during the async
  * computation. This way, when the user of the async computation frees
  * the request, the state as a talloc child will be free'd along with
  * all the temporary variables hanging off the state.
@@ -1592,12 +1660,96 @@ size_t tevent_queue_length(struct tevent_queue *queue);
  */
 bool tevent_queue_running(struct tevent_queue *queue);
 
+/**
+ * @brief Create a tevent subrequest that waits in a tevent_queue
+ *
+ * The idea is that always the same syntax for tevent requests.
+ *
+ * @param[in]  mem_ctx  The talloc memory context to use.
+ *
+ * @param[in]  ev       The event handle to setup the request.
+ *
+ * @param[in]  queue    The queue to wait in.
+ *
+ * @return              The new subrequest, NULL on error.
+ *
+ * @see tevent_queue_wait_recv()
+ */
+struct tevent_req *tevent_queue_wait_send(TALLOC_CTX *mem_ctx,
+					  struct tevent_context *ev,
+					  struct tevent_queue *queue);
+
+/**
+ * @brief Check if we no longer need to wait in the queue.
+ *
+ * This function needs to be called in the callback function set after calling
+ * tevent_queue_wait_send().
+ *
+ * @param[in]  req      The tevent request to check.
+ *
+ * @return              True on success, false otherwise.
+ *
+ * @see tevent_queue_wait_send()
+ */
+bool tevent_queue_wait_recv(struct tevent_req *req);
+
 typedef int (*tevent_nesting_hook)(struct tevent_context *ev,
 				   void *private_data,
 				   uint32_t level,
 				   bool begin,
 				   void *stack_ptr,
 				   const char *location);
+
+/**
+ * @brief Create a tevent_thread_proxy for message passing between threads.
+ *
+ * The tevent_context must have been allocated on the NULL
+ * talloc context, and talloc_disable_null_tracking() must
+ * have been called.
+ *
+ * @param[in]  dest_ev_ctx      The tevent_context to receive events.
+ *
+ * @return              An allocated tevent_thread_proxy, NULL on error.
+ *                      If tevent was compiled without PTHREAD support
+ *                      NULL is always returned and errno set to ENOSYS.
+ *
+ * @see tevent_thread_proxy_schedule()
+ */
+struct tevent_thread_proxy *tevent_thread_proxy_create(
+                struct tevent_context *dest_ev_ctx);
+
+/**
+ * @brief Schedule an immediate event on an event context from another thread.
+ *
+ * Causes dest_ev_ctx, being run by another thread, to receive an
+ * immediate event calling the handler with the *pp_private parameter.
+ *
+ * *pp_im must be a pointer to an immediate event talloced on a context owned
+ * by the calling thread, or the NULL context. Ownership will
+ * be transferred to the tevent_thread_proxy and *pp_im will be returned as NULL.
+ *
+ * *pp_private_data must be a talloced area of memory with no destructors.
+ * Ownership of this memory will be transferred to the tevent library and
+ * *pp_private_data will be set to NULL on successful completion of
+ * the call. Set pp_private to NULL if no parameter transfer
+ * needed (a pure callback). This is an asynchronous request, caller
+ * does not wait for callback to be completed before returning.
+ *
+ * @param[in]  tp               The tevent_thread_proxy to use.
+ *
+ * @param[in]  pp_im            Pointer to immediate event pointer.
+ *
+ * @param[in]  handler          The function that will be called.
+ *
+ * @param[in]  pp_private_data  The talloced memory to transfer.
+ *
+ * @see tevent_thread_proxy_create()
+ */
+void tevent_thread_proxy_schedule(struct tevent_thread_proxy *tp,
+				  struct tevent_immediate **pp_im,
+				  tevent_immediate_handler_t handler,
+				  void *pp_private_data);
+
 #ifdef TEVENT_DEPRECATED
 #ifndef _DEPRECATED_
 #if (__GNUC__ >= 3) && (__GNUC_MINOR__ >= 1 )

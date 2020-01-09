@@ -1,8 +1,9 @@
 # waf build tool for building IDL files with pidl
 
-from TaskGen import before
-import Build, os, sys, Logs
-from samba_utils import *
+import os
+import Build
+from TaskGen import feature, before
+from samba_utils import SET_TARGET_TYPE, TO_LIST, LOCAL_CACHE
 
 def SAMBA_PIDL(bld, pname, source,
                options='',
@@ -59,9 +60,9 @@ def SAMBA_PIDL(bld, pname, source,
     # the cd .. is needed because pidl currently is sensitive to the directory it is run in
     cpp = ""
     cc = ""
-    if bld.CONFIG_SET("CPP"):
+    if bld.CONFIG_SET("CPP") and bld.CONFIG_GET("CPP") != "":
         if isinstance(bld.CONFIG_GET("CPP"), list):
-            cpp = 'CPP="%s"' % bld.CONFIG_GET("CPP")[0]
+            cpp = 'CPP="%s"' % " ".join(bld.CONFIG_GET("CPP"))
         else:
             cpp = 'CPP="%s"' % bld.CONFIG_GET("CPP")
 
@@ -71,14 +72,14 @@ def SAMBA_PIDL(bld, pname, source,
 
     if bld.CONFIG_SET("CC"):
         if isinstance(bld.CONFIG_GET("CC"), list):
-            cc = 'CC="%s"' % bld.CONFIG_GET("CC")[0]
+            cc = 'CC="%s"' % " ".join(bld.CONFIG_GET("CC"))
         else:
             cc = 'CC="%s"' % bld.CONFIG_GET("CC")
 
     t = bld(rule='cd .. && %s %s ${PERL} "${PIDL}" --quiet ${OPTIONS} --outputdir ${OUTPUTDIR} -- "${SRC[0].abspath(env)}"' % (cpp, cc),
             ext_out    = '.c',
             before     = 'cc',
-            on_results = True,
+            update_outputs = True,
             shell      = True,
             source     = source,
             target     = out_files,
@@ -112,13 +113,12 @@ Build.BuildContext.SAMBA_PIDL_LIST = SAMBA_PIDL_LIST
 
 #################################################################
 # the rule for generating the NDR tables
-from TaskGen import feature, before
 @feature('collect')
 @before('exec_rule')
 def collect(self):
     pidl_headers = LOCAL_CACHE(self.bld, 'PIDL_HEADERS')
     for (name, hd) in pidl_headers.items():
-        y = self.bld.name_to_obj(name, self.env)
+        y = self.bld.get_tgen_by_name(name)
         self.bld.ASSERT(y is not None, 'Failed to find PIDL header %s' % name)
         y.post()
         for node in hd:
@@ -128,14 +128,13 @@ def collect(self):
 
 def SAMBA_PIDL_TABLES(bld, name, target):
     '''generate the pidl NDR tables file'''
-    headers = bld.env.PIDL_HEADERS
     bld.SET_BUILD_GROUP('main')
     t = bld(
             features = 'collect',
             rule     = '${PERL} ${SRC} --output ${TGT} | sed "s|default/||" > ${TGT}',
             ext_out  = '.c',
             before   = 'cc',
-            on_results = True,
+            update_outputs = True,
             shell    = True,
             source   = '../../librpc/tables.pl',
             target   = target,

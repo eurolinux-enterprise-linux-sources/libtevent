@@ -2,9 +2,9 @@
 # to test for commonly needed configuration options
 
 import os, shutil, re
-import Build, Configure, Utils
+import Build, Configure, Utils, Options, Logs
 from Configure import conf
-from samba_utils import *
+from samba_utils import TO_LIST, ADD_LD_LIBRARY_PATH
 
 
 def add_option(self, *k, **kw):
@@ -196,7 +196,7 @@ int foo(int v) {
     return v * 2;
 }
 '''
-    return conf.check(features='cc cshlib',vnum="1",fragment=snip,msg=msg)
+    return conf.check(features='c cshlib',vnum="1",fragment=snip,msg=msg)
 
 @conf
 def CHECK_NEED_LC(conf, msg):
@@ -215,9 +215,7 @@ def CHECK_NEED_LC(conf, msg):
 
     os.makedirs(subdir)
 
-    dest = open(os.path.join(subdir, 'liblc1.c'), 'w')
-    dest.write('#include <stdio.h>\nint lib_func(void) { FILE *f = fopen("foo", "r");}\n')
-    dest.close()
+    Utils.writef(os.path.join(subdir, 'liblc1.c'), '#include <stdio.h>\nint lib_func(void) { FILE *f = fopen("foo", "r");}\n')
 
     bld = Build.BuildContext()
     bld.log = conf.log
@@ -228,7 +226,7 @@ def CHECK_NEED_LC(conf, msg):
 
     bld.rescan(bld.srcnode)
 
-    bld(features='cc cshlib',
+    bld(features='c cshlib',
         source='liblctest/liblc1.c',
         ldflags=conf.env['EXTRA_LDFLAGS'],
         target='liblc',
@@ -248,9 +246,6 @@ def CHECK_SHLIB_W_PYTHON(conf, msg):
     '''check if we need -undefined dynamic_lookup'''
 
     dir = find_config_dir(conf)
-
-    env = conf.env
-
     snip = '''
 #include <Python.h>
 #include <crt_externs.h>
@@ -263,7 +258,7 @@ int foo(int v) {
     ldb_module = PyImport_ImportModule("ldb");
     return v * 2;
 }'''
-    return conf.check(features='cc cshlib',uselib='PYEMBED',fragment=snip,msg=msg)
+    return conf.check(features='c cshlib',uselib='PYEMBED',fragment=snip,msg=msg)
 
 # this one is quite complex, and should probably be broken up
 # into several parts. I'd quite like to create a set of CHECK_COMPOUND()
@@ -290,13 +285,8 @@ def CHECK_LIBRARY_SUPPORT(conf, rpath=False, version_script=False, msg=None):
 
     os.makedirs(subdir)
 
-    dest = open(os.path.join(subdir, 'lib1.c'), 'w')
-    dest.write('int lib_func(void) { return 42; }\n')
-    dest.close()
-
-    dest = open(os.path.join(dir, 'main.c'), 'w')
-    dest.write('int main(void) {return !(lib_func() == 42);}\n')
-    dest.close()
+    Utils.writef(os.path.join(subdir, 'lib1.c'), 'int lib_func(void) { return 42; }\n')
+    Utils.writef(os.path.join(dir, 'main.c'), 'int main(void) {return !(lib_func() == 42);}\n')
 
     bld = Build.BuildContext()
     bld.log = conf.log
@@ -310,17 +300,15 @@ def CHECK_LIBRARY_SUPPORT(conf, rpath=False, version_script=False, msg=None):
     ldflags = []
     if version_script:
         ldflags.append("-Wl,--version-script=%s/vscript" % bld.path.abspath())
-        dest = open(os.path.join(dir,'vscript'), 'w')
-        dest.write('TEST_1.0A2 { global: *; };\n')
-        dest.close()
+        Utils.writef(os.path.join(dir,'vscript'), 'TEST_1.0A2 { global: *; };\n')
 
-    bld(features='cc cshlib',
+    bld(features='c cshlib',
         source='libdir/lib1.c',
         target='libdir/lib1',
         ldflags=ldflags,
         name='lib1')
 
-    o = bld(features='cc cprogram',
+    o = bld(features='c cprogram',
             source='main.c',
             target='prog1',
             uselib_local='lib1')
@@ -382,15 +370,13 @@ def CHECK_PERL_MANPAGE(conf, msg=None, section=None):
     if not os.path.exists(bdir):
         os.makedirs(bdir)
 
-    dest = open(os.path.join(bdir, 'Makefile.PL'), 'w')
-    dest.write("""
+    Utils.writef(os.path.join(bdir, 'Makefile.PL'), """
 use ExtUtils::MakeMaker;
 WriteMakefile(
     'NAME'    => 'WafTest',
     'EXE_FILES' => [ 'WafTest' ]
 );
 """)
-    dest.close()
     back = os.path.abspath('.')
     os.chdir(bdir)
     proc = Utils.pproc.Popen(['perl', 'Makefile.PL'],
@@ -405,9 +391,7 @@ WriteMakefile(
         return
 
     if section:
-        f = open(os.path.join(bdir,'Makefile'), 'r')
-        man = f.read()
-        f.close()
+        man = Utils.readf(os.path.join(bdir,'Makefile'))
         m = re.search('MAN%sEXT\s+=\s+(\w+)' % section, man)
         if not m:
             conf.check_message_2('not found', color='YELLOW')
@@ -503,3 +487,36 @@ def CHECK_XSLTPROC_MANPAGES(conf):
                              msg='Checking for stylesheet %s' % s,
                              define='XSLTPROC_MANPAGES', on_target=False,
                              boolean=True)
+    if not conf.CONFIG_SET('XSLTPROC_MANPAGES'):
+        print "A local copy of the docbook.xsl wasn't found on your system" \
+              " consider installing package like docbook-xsl"
+
+#
+# Determine the standard libpath for the used compiler,
+# so we can later use that to filter out these standard
+# library paths when some tools like cups-config or
+# python-config report standard lib paths with their
+# ldflags (-L...)
+#
+@conf
+def CHECK_STANDARD_LIBPATH(conf):
+    # at least gcc and clang support this:
+    try:
+        cmd = conf.env.CC + ['-print-search-dirs']
+        out = Utils.cmd_output(cmd).split('\n')
+    except ValueError:
+        # option not supported by compiler - use a standard list of directories
+        dirlist = [ '/usr/lib', '/usr/lib64' ]
+    except:
+        raise Utils.WafError('Unexpected error running "%s"' % (cmd))
+    else:
+        dirlist = []
+        for line in out:
+            line = line.strip()
+            if line.startswith("libraries: ="):
+                dirliststr = line[len("libraries: ="):]
+                dirlist = [ os.path.normpath(x) for x in dirliststr.split(':') ]
+                break
+
+    conf.env.STANDARD_LIBPATH = dirlist
+
