@@ -5,7 +5,7 @@
 %{!?python_version: %global python_version %(%{__python} -c "from distutils.sysconfig import get_python_version; print(get_python_version())")}
 
 Name: libtevent
-Version: 0.9.17
+Version: 0.9.18
 Release: 1%{?dist}
 Group: System Environment/Daemons
 Summary: The tevent library
@@ -20,6 +20,10 @@ BuildRequires: pytalloc-devel >= 2.0.7
 BuildRequires: doxygen
 BuildRequires: docbook-style-xsl
 BuildRequires: libxslt
+
+# Patches
+Patch0001:  tevent-0.9.18-relax-talloc-requirements.patch
+Patch0002:  0001-tevent-Fix-Coverity-ID-989236-Operands-don-t-affect-.patch
 
 
 %description
@@ -49,6 +53,8 @@ Python bindings for libtevent
 
 %prep
 %setup -q -n tevent-%{version}
+%patch0001 -p1 -b .talloc_minversion
+%patch0002 -p3 -b .flags
 
 %build
 %configure --disable-rpath \
@@ -102,6 +108,9 @@ rm -rf $RPM_BUILD_ROOT
 %postun -p /sbin/ldconfig
 
 %changelog
+* Mon Jul 08 2013 Jakub Hrozek <jhrozek@redhat.com> - 0.9.18-1
+- Resolves: rhbz#980956 - Rebase libtevent to version 0.9.18
+
 * Mon Aug 20 2010 Jakub Hrozek <jhrozek@redhat.com> - 0.9.17-1
 - Rebase to 0.9.17 to provide the version Samba4 needs
 - Drop EXCLUDE_PATTERNS workaround in specfile

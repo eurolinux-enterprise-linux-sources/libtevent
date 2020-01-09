@@ -98,7 +98,43 @@ def vcs_dir_contents(path):
     return Utils.cmd_output(ls_files_cmd, cwd=cwd, env=env).split()
 
 
-def dist(appname='',version=''):
+def dist(appname='', version=''):
+
+    def add_files_to_tarball(tar, srcdir, srcsubdir, dstdir, dstsubdir, blacklist, files):
+        if blacklist is None:
+            blacklist = []
+        for f in files:
+            abspath = os.path.join(srcdir, f)
+
+            if srcsubdir != '.':
+                f = f[len(srcsubdir)+1:]
+
+            # Remove files in the blacklist
+            if f in blacklist:
+                continue
+            blacklisted = False
+            # Remove directories in the blacklist
+            for d in blacklist:
+                if f.startswith(d):
+                    blacklisted = True
+            if blacklisted:
+                continue
+            if os.path.isdir(abspath):
+                continue
+            if dstsubdir != '.':
+                f = dstsubdir + '/' + f
+            fname = dstdir + '/' + f
+            add_tarfile(tar, fname, abspath, srcsubdir)
+
+
+    def list_directory_files(abspath):
+        out_files = []
+        for root, dirs, files in os.walk(abspath):
+            for f in files:
+                out_files.append(os.path.join(root, f))
+        return out_files
+
+
     if not isinstance(appname, str) or not appname:
         # this copes with a mismatch in the calling arguments for dist()
         appname = Utils.g_module.APPNAME
@@ -135,28 +171,7 @@ def dist(appname='',version=''):
         except Exception, e:
             Logs.error('unable to get contents of %s: %s' % (absdir, e))
             sys.exit(1)
-        for f in files:
-            abspath = os.path.join(srcdir, f)
-
-            if dir != '.':
-                f = f[len(dir)+1:]
-
-            # Remove files in the blacklist
-            if f in blacklist:
-                continue
-            blacklisted = False
-            # Remove directories in the blacklist
-            for d in blacklist:
-                if f.startswith(d):
-                    blacklisted = True
-            if blacklisted:
-                continue
-            if os.path.isdir(abspath):
-                continue
-            if destdir != '.':
-                f = destdir + '/' + f
-            fname = dist_base + '/' + f
-            add_tarfile(tar, fname, abspath, dir)
+        add_files_to_tarball(tar, srcdir, dir, dist_base, destdir, blacklist, files)
 
     if dist_files:
         for file in dist_files.split():
@@ -168,11 +183,14 @@ def dist(appname='',version=''):
 
             absfile = os.path.join(srcdir, file)
 
-            if destfile != file:
-                file = destfile
-
-            fname = dist_base + '/' + file
-            add_tarfile(tar, fname, absfile, file)
+            if os.path.isdir(absfile):
+                destdir = destfile
+                dir = file
+                files = list_directory_files(dir)
+                add_files_to_tarball(tar, srcdir, dir, dist_base, destdir, blacklist, files)
+            else:
+                fname = dist_base + '/' + destfile
+                add_tarfile(tar, fname, absfile, destfile)
 
     tar.close()
 
@@ -212,11 +230,13 @@ def DIST_DIRS(dirs):
         dist_dirs = dirs
 
 @conf
-def DIST_FILES(files):
+def DIST_FILES(files, extend=False):
     '''set additional files for packaging, relative to top srcdir'''
     global dist_files
     if not dist_files:
         dist_files = files
+    elif extend:
+        dist_files = dist_files + " " + files
 
 @conf
 def DIST_BLACKLIST(blacklist):

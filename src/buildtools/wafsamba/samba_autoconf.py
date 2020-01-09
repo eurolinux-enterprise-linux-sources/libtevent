@@ -62,9 +62,9 @@ def COMPOUND_END(conf, result):
     conf.check_message_1 = conf.saved_check_message_1
     conf.check_message_2 = conf.saved_check_message_2
     p = conf.check_message_2
-    if result == True:
-        p('ok ')
-    elif result == False:
+    if result is True:
+        p('ok')
+    elif not result:
         p('not found', 'YELLOW')
     else:
         p(result)
@@ -241,7 +241,7 @@ def CHECK_FUNC(conf, f, link=True, lib=None, headers=None):
 
     conf.COMPOUND_START('Checking for %s' % f)
 
-    if link is None or link == True:
+    if link is None or link:
         ret = CHECK_CODE(conf,
                          # this is based on the autoconf strategy
                          '''
@@ -284,7 +284,7 @@ def CHECK_FUNC(conf, f, link=True, lib=None, headers=None):
                              headers=headers,
                              msg='Checking for macro %s' % f)
 
-    if not ret and (link is None or link == False):
+    if not ret and (link is None or not link):
         ret = CHECK_VARIABLE(conf, f,
                              define=define,
                              headers=headers,
@@ -323,7 +323,25 @@ def CHECK_SIZEOF(conf, vars, headers=None, define=None):
             ret = False
     return ret
 
+@conf
+def CHECK_VALUEOF(conf, v, headers=None, define=None):
+    '''check the value of a variable/define'''
+    ret = True
+    v_define = define
+    if v_define is None:
+        v_define = 'VALUEOF_%s' % v.upper().replace(' ', '_')
+    if CHECK_CODE(conf,
+                  'printf("%%u", (unsigned)(%s))' % v,
+                  define=v_define,
+                  execute=True,
+                  define_ret=True,
+                  quote=False,
+                  headers=headers,
+                  local_include=False,
+                  msg="Checking value of %s" % v):
+        return int(conf.env[v_define])
 
+    return None
 
 @conf
 def CHECK_CODE(conf, code, define,
@@ -470,7 +488,7 @@ def CONFIG_SET(conf, option):
     if option not in conf.env:
         return False
     v = conf.env[option]
-    if v == None:
+    if v is None:
         return False
     if v == []:
         return False
@@ -629,7 +647,7 @@ def SAMBA_CONFIG_H(conf, path=None):
 
         # This check is because for ldb_search(), a NULL format string
         # is not an error, but some compilers complain about that.
-        if CHECK_CFLAGS(conf, "-Werror=format", '''
+        if CHECK_CFLAGS(conf, ["-Werror=format", "-Wformat=2"], '''
 int testformat(char *format, ...) __attribute__ ((format (__printf__, 1, 2)));
 
 int main(void) {

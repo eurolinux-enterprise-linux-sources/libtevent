@@ -31,6 +31,7 @@ import samba_wildcard
 import stale_files
 import symbols
 import pkgconfig
+import configure_file
 
 # some systems have broken threading in python
 if os.environ.get('WAF_NOTHREADS') == '1':
@@ -284,9 +285,9 @@ def SAMBA_LIBRARY(bld, libname, source,
     if pc_files is not None and not private_library:
         bld.PKG_CONFIG_FILES(pc_files, vnum=vnum)
 
-    if (manpages is not None and 'XSLTPROC_MANPAGES' in bld.env and 
+    if (manpages is not None and 'XSLTPROC_MANPAGES' in bld.env and
         bld.env['XSLTPROC_MANPAGES']):
-        bld.MANPAGES(manpages)
+        bld.MANPAGES(manpages, install)
 
 
 Build.BuildContext.SAMBA_LIBRARY = SAMBA_LIBRARY
@@ -382,7 +383,7 @@ def SAMBA_BINARY(bld, binname, source,
         )
 
     if manpages is not None and 'XSLTPROC_MANPAGES' in bld.env and bld.env['XSLTPROC_MANPAGES']:
-        bld.MANPAGES(manpages)
+        bld.MANPAGES(manpages, install)
 
 Build.BuildContext.SAMBA_BINARY = SAMBA_BINARY
 
@@ -404,6 +405,7 @@ def SAMBA_MODULE(bld, modname, source,
                  subdir=None,
                  enabled=True,
                  pyembed=False,
+                 manpages=None,
                  allow_undefined_symbols=False
                  ):
     '''define a Samba module.'''
@@ -469,6 +471,7 @@ def SAMBA_MODULE(bld, modname, source,
                       link_name=build_link_name,
                       install_path="${MODULESDIR}/%s" % subsystem,
                       pyembed=pyembed,
+                      manpages=manpages,
                       allow_undefined_symbols=allow_undefined_symbols
                       )
 
@@ -577,6 +580,12 @@ def SAMBA_GENERATOR(bld, name, rule, source='', target='',
     if not enabled:
         return
 
+    dep_vars = []
+    if isinstance(vars, dict):
+        dep_vars = vars.keys()
+    elif isinstance(vars, list):
+        dep_vars = vars
+
     bld.SET_BUILD_GROUP(group)
     t = bld(
         rule=rule,
@@ -587,7 +596,7 @@ def SAMBA_GENERATOR(bld, name, rule, source='', target='',
         before='cc',
         ext_out='.c',
         samba_type='GENERATOR',
-        dep_vars = [rule] + (vars or []),
+        dep_vars = [rule] + dep_vars,
         name=name)
 
     if always:
@@ -661,7 +670,7 @@ def SAMBA_SCRIPT(bld, name, pattern, installdir, installname=None):
     bld.SET_BUILD_GROUP('build_source')
     for s in TO_LIST(source):
         iname = s
-        if installname != None:
+        if installname is not None:
             iname = installname
         target = os.path.join(installdir, iname)
         tgtdir = os.path.dirname(os.path.join(bld.srcnode.abspath(bld.env), '..', target))
@@ -762,7 +771,7 @@ def INSTALL_DIRS(bld, destdir, dirs):
 Build.BuildContext.INSTALL_DIRS = INSTALL_DIRS
 
 
-def MANPAGES(bld, manpages):
+def MANPAGES(bld, manpages, install):
     '''build and install manual pages'''
     bld.env.MAN_XSL = 'http://docbook.sourceforge.net/release/xsl/current/manpages/docbook.xsl'
     for m in manpages.split():
@@ -771,11 +780,31 @@ def MANPAGES(bld, manpages):
                             source=source,
                             target=m,
                             group='final',
-                            rule='${XSLTPROC} -o ${TGT} --nonet ${MAN_XSL} ${SRC}'
+                            rule='${XSLTPROC} --xinclude -o ${TGT} --nonet ${MAN_XSL} ${SRC}'
                             )
-        bld.INSTALL_FILES('${MANDIR}/man%s' % m[-1], m, flat=True)
+        if install:
+            bld.INSTALL_FILES('${MANDIR}/man%s' % m[-1], m, flat=True)
 Build.BuildContext.MANPAGES = MANPAGES
 
+def SAMBAMANPAGES(bld, manpages):
+    '''build and install manual pages'''
+    bld.env.SAMBA_EXPAND_XSL = bld.srcnode.abspath() + '/docs-xml/xslt/expand-sambadoc.xsl'
+    bld.env.SAMBA_MAN_XSL = bld.srcnode.abspath() + '/docs-xml/xslt/man.xsl'
+    bld.env.SAMBA_CATALOGS = 'file:///etc/xml/catalog file:///usr/local/share/xml/catalog file://' + bld.srcnode.abspath() + '/bin/default/docs-xml/build/catalog.xml'
+
+    for m in manpages.split():
+        source = m + '.xml'
+        bld.SAMBA_GENERATOR(m,
+                            source=source,
+                            target=m,
+                            group='final',
+                            rule='''XML_CATALOG_FILES="${SAMBA_CATALOGS}"
+                                    export XML_CATALOG_FILES
+                                    ${XSLTPROC} --xinclude --stringparam noreference 0 -o ${TGT}.xml --nonet ${SAMBA_EXPAND_XSL} ${SRC}
+                                    ${XSLTPROC} --nonet -o ${TGT} ${SAMBA_MAN_XSL} ${TGT}.xml'''
+                            )
+        bld.INSTALL_FILES('${MANDIR}/man%s' % m[-1], m, flat=True)
+Build.BuildContext.SAMBAMANPAGES = SAMBAMANPAGES
 
 #############################################################
 # give a nicer display when building different types of files

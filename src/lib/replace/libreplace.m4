@@ -68,7 +68,7 @@ AC_FUNC_MEMCMP
 AC_CHECK_FUNCS([pipe strftime srandom random srand rand usleep setbuffer lstat getpgrp utime utimes])
 
 AC_CHECK_HEADERS(stdbool.h stdint.h sys/select.h)
-AC_CHECK_HEADERS(setjmp.h utime.h)
+AC_CHECK_HEADERS(setjmp.h utime.h sys/wait.h)
 
 LIBREPLACE_PROVIDE_HEADER([stdint.h])
 LIBREPLACE_PROVIDE_HEADER([stdbool.h])
@@ -126,6 +126,7 @@ AC_CHECK_HEADERS(unix.h)
 AC_CHECK_HEADERS(malloc.h)
 AC_CHECK_HEADERS(syscall.h)
 AC_CHECK_HEADERS(sys/syscall.h)
+AC_CHECK_HEADERS(sys/ucontext.h)
 
 AC_CHECK_FUNCS(syscall setuid seteuid setreuid setresuid setgid setegid setregid setresgid setgroups)
 AC_CHECK_FUNCS(chroot bzero strerror strerror_r memalign posix_memalign getpagesize)
@@ -212,12 +213,27 @@ AC_TRY_RUN([#include <stdlib.h>
 #include <unistd.h>
 main() { 
   struct stat st;
-  char tpl[20]="/tmp/test.XXXXXX"; 
-  int fd = mkstemp(tpl); 
-  if (fd == -1) exit(1);
+  char tpl[20]="/tmp/test.XXXXXX";
+  char tpl2[20]="/tmp/test.XXXXXX";
+  int fd = mkstemp(tpl);
+  int fd2 = mkstemp(tpl2);
+  if (fd == -1) {
+        if (fd2 != -1) {
+                unlink(tpl2);
+        }
+        exit(1);
+  }
+  if (fd2 == -1) exit(1);
   unlink(tpl);
+  unlink(tpl2);
   if (fstat(fd, &st) != 0) exit(1);
   if ((st.st_mode & 0777) != 0600) exit(1);
+  if (strcmp(tpl, "/tmp/test.XXXXXX") == 0) {
+        exit(1);
+  }
+  if (strcmp(tpl, tpl2) == 0) {
+        exit(1);
+  }
   exit(0);
 }],
 libreplace_cv_HAVE_SECURE_MKSTEMP=yes,
@@ -342,6 +358,16 @@ if test x"$libreplace_cv_sig_atomic_t" = x"yes"; then
 fi
 
 
+dnl Check if the C compiler understands volatile (it should, being ANSI).
+AC_CACHE_CHECK([that the C compiler understands volatile],libreplace_cv_volatile, [
+	AC_TRY_COMPILE([#include <sys/types.h>],[volatile int i = 0],
+		libreplace_cv_volatile=yes,libreplace_cv_volatile=no)])
+if test x"$libreplace_cv_volatile" = x"yes"; then
+	AC_DEFINE(HAVE_VOLATILE, 1, [Whether the C compiler understands volatile])
+fi
+
+m4_include(system/config.m4)
+
 AC_CACHE_CHECK([for O_DIRECT flag to open(2)],libreplace_cv_HAVE_OPEN_O_DIRECT,[
 AC_TRY_COMPILE([
 #include <unistd.h>
@@ -354,19 +380,7 @@ if test x"$libreplace_cv_HAVE_OPEN_O_DIRECT" = x"yes"; then
     AC_DEFINE(HAVE_OPEN_O_DIRECT,1,[Whether the open(2) accepts O_DIRECT])
 fi
 
-
-dnl Check if the C compiler understands volatile (it should, being ANSI).
-AC_CACHE_CHECK([that the C compiler understands volatile],libreplace_cv_volatile, [
-	AC_TRY_COMPILE([#include <sys/types.h>],[volatile int i = 0],
-		libreplace_cv_volatile=yes,libreplace_cv_volatile=no)])
-if test x"$libreplace_cv_volatile" = x"yes"; then
-	AC_DEFINE(HAVE_VOLATILE, 1, [Whether the C compiler understands volatile])
-fi
-
-m4_include(system/config.m4)
-
 m4_include(dlfcn.m4)
-m4_include(getpass.m4)
 m4_include(strptime.m4)
 m4_include(win32.m4)
 m4_include(timegm.m4)
@@ -400,6 +414,18 @@ AC_CACHE_CHECK([for struct timespec type],libreplace_cv_struct_timespec, [
 	libreplace_cv_struct_timespec=yes,libreplace_cv_struct_timespec=no)])
 if test x"$libreplace_cv_struct_timespec" = x"yes"; then
    AC_DEFINE(HAVE_STRUCT_TIMESPEC,1,[Whether we have struct timespec])
+fi
+
+AC_CACHE_CHECK([for ucontext_t type],libreplace_cv_ucontext_t, [
+    AC_TRY_COMPILE([
+#include <signal.h>
+#if HAVE_SYS_UCONTEXT_H
+#include <sys/ucontext.h>
+# endif
+],[ucontext_t uc; sigaddset(&uc.uc_sigmask, SIGUSR1);],
+	libreplace_cv_ucontext_t=yes,libreplace_cv_ucontext_t=no)])
+if test x"$libreplace_cv_ucontext_t" = x"yes"; then
+   AC_DEFINE(HAVE_UCONTEXT_T,1,[Whether we have ucontext_t])
 fi
 
 AC_CHECK_FUNCS([printf memset memcpy],,[AC_MSG_ERROR([Required function not found])])

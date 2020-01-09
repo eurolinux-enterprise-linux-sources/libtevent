@@ -1,0 +1,29 @@
+diff -up tevent-0.9.18/lib/talloc/wscript.talloc_minversion tevent-0.9.18/lib/talloc/wscript
+--- tevent-0.9.18/lib/talloc/wscript.talloc_minversion	2013-01-27 12:51:43.000000000 +0100
++++ tevent-0.9.18/lib/talloc/wscript	2013-05-14 17:30:33.201986041 +0200
+@@ -2,6 +2,7 @@
+ 
+ APPNAME = 'talloc'
+ VERSION = '2.0.8'
++MIN_SYSTEM_VERSION = '2.0.7'
+ 
+ 
+ blddir = 'bin'
+@@ -44,12 +45,13 @@ def configure(conf):
+     conf.env.disable_python = getattr(Options.options, 'disable_python', False)
+ 
+     if not conf.env.standalone_talloc:
+-        if conf.CHECK_BUNDLED_SYSTEM_PKG('talloc', minversion=VERSION,
++        if conf.CHECK_BUNDLED_SYSTEM_PKG('talloc', minversion=MIN_SYSTEM_VERSION,
+                                      implied_deps='replace'):
+             conf.define('USING_SYSTEM_TALLOC', 1)
+-        if conf.CHECK_BUNDLED_SYSTEM_PKG('pytalloc-util', minversion=VERSION,
+-                                     implied_deps='talloc replace'):
+-            conf.define('USING_SYSTEM_PYTALLOC_UTIL', 1)
++        if not conf.env.disable_python:
++            if conf.CHECK_BUNDLED_SYSTEM_PKG('pytalloc-util', minversion=MIN_SYSTEM_VERSION,
++                                             implied_deps='talloc replace'):
++                conf.define('USING_SYSTEM_PYTALLOC_UTIL', 1)
+ 
+     conf.env.TALLOC_COMPAT1 = Options.options.TALLOC_COMPAT1
+ 
