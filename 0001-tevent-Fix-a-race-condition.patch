@@ -1,0 +1,57 @@
+From 75f163dbcbd46922934e24cac6d4b7101e06321d Mon Sep 17 00:00:00 2001
+From: Volker Lendecke <vl@samba.org>
+Date: Fri, 10 Nov 2017 21:22:26 +0100
+Subject: [PATCH] tevent: Fix a race condition
+
+We can't rely on tctx to exist after we unlocked the mutex. It took a
+while, but this does lead to data corruption. If *tctx is replaced with
+something where tctx->wakeup_fd points to a real, existing file
+descriptor, we're screwed. And by screwed, this means file corruption
+on disk.
+
+Again. I am not tall enough for this business.
+
+http://bholley.net/blog/2015/must-be-this-tall-to-write-multi-threaded-code.html
+
+BUG: https://bugzilla.samba.org/show_bug.cgi?id=13130
+
+Signed-off-by: Volker Lendecke <vl@samba.org>
+Reviewed-by: Jeremy Allison <jra@samba.org>
+---
+ lib/tevent/tevent_threads.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/lib/tevent/tevent_threads.c b/lib/tevent/tevent_threads.c
+index 4d1a8805181..2e83f1b66c2 100644
+--- a/lib/tevent/tevent_threads.c
++++ b/lib/tevent/tevent_threads.c
+@@ -451,7 +451,7 @@ void _tevent_threaded_schedule_immediate(struct tevent_threaded_context *tctx,
+ {
+ #ifdef HAVE_PTHREAD
+ 	struct tevent_context *ev;
+-	int ret;
++	int ret, wakeup_fd;
+ 
+ 	ret = pthread_mutex_lock(&tctx->event_ctx_mutex);
+ 	if (ret != 0) {
+@@ -495,6 +495,8 @@ void _tevent_threaded_schedule_immediate(struct tevent_threaded_context *tctx,
+ 		abort();
+ 	}
+ 
++	wakeup_fd = tctx->wakeup_fd;
++
+ 	ret = pthread_mutex_unlock(&tctx->event_ctx_mutex);
+ 	if (ret != 0) {
+ 		abort();
+@@ -510,7 +512,7 @@ void _tevent_threaded_schedule_immediate(struct tevent_threaded_context *tctx,
+ 	 * than a noncontended one. So I'd opt for the lower footprint
+ 	 * initially. Maybe we have to change that later.
+ 	 */
+-	tevent_common_wakeup_fd(tctx->wakeup_fd);
++	tevent_common_wakeup_fd(wakeup_fd);
+ #else
+ 	/*
+ 	 * tevent_threaded_context_create() returned NULL with ENOSYS...
+-- 
+2.15.0.448.gf294e3d99a-goog
+
