@@ -1,6 +1,6 @@
 Name: libtevent
-Version: 0.9.33
-Release: 2%{?dist}
+Version: 0.9.36
+Release: 1%{?dist}
 Group: System Environment/Daemons
 Summary: The tevent library
 License: LGPLv3+
@@ -18,7 +18,6 @@ BuildRequires: libxslt
 Provides: bundled(libreplace)
 
 # Patches
-Patch0001:     0001-tevent-Fix-a-race-condition.patch
 
 %description
 Tevent is an event system based on the talloc memory management library.
@@ -118,6 +117,9 @@ rm -rf $RPM_BUILD_ROOT
 %postun -p /sbin/ldconfig
 
 %changelog
+* Tue Apr 10 2018 Jakub Hrozek <jhrozek@redhat.com> - 0.9.36
+- Resolves: #1558494 - Rebase tevent to the latest available upstream release
+
 * Thu Nov 16 2017 Jakub Hrozek <jhrozek@redhat.com> - 0.9.34-1
 - Resolves: #1512414 - tevent can cause a Samba file corruption bug under
                        heavy threaded load
