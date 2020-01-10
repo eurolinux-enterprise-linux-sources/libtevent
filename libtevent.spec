@@ -1,5 +1,5 @@
 Name: libtevent
-Version: 0.9.31
+Version: 0.9.33
 Release: 2%{?dist}
 Group: System Environment/Daemons
 Summary: The tevent library
@@ -118,9 +118,13 @@ rm -rf $RPM_BUILD_ROOT
 %postun -p /sbin/ldconfig
 
 %changelog
-* Tue Feb 14 2017 Jakub Hrozek <jhrozek@redhat.com> - 0.9.31-2
-- Resolves: #1513984 - tevent can cause a Samba file corruption bug under
-                       heavy threaded load [rhel-7.4.z]
+* Thu Nov 16 2017 Jakub Hrozek <jhrozek@redhat.com> - 0.9.34-1
+- Resolves: #1512414 - tevent can cause a Samba file corruption bug under
+                       heavy threaded load
+
+* Sun Oct 15 2017 Jakub Hrozek <jhrozek@redhat.com> - 0.9.33-1
+- Resolves: #1470054 - Rebase libtevent to enable samba rebase to version
+                       4.7.x
 
 * Tue Feb 14 2017 Jakub Hrozek <jhrozek@redhat.com> - 0.9.31-1
 - Resolves: #1393812 - Rebase libtevent in RHEL-7.4 to version 4.6.x
